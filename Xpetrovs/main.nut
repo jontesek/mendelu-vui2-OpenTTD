@@ -1,10 +1,10 @@
 
-class XpetrovsAi extends AIController {
+class Xpetrovs extends AIController {
 	constructor() {
 	}
 }
 
-function XpetrovsAi::Start()
+function Xpetrovs::Start()
 {
 	while (true) {
 		AILog.Info("Ahoj vsichni! Provedl jsem " + "instrukci: " + this.GetTick());
