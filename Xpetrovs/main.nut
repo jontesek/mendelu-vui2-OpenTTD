@@ -38,12 +38,37 @@ function Xpetrovs::Start()
 	// Set company name
 	this.NameCompany("JontesRailCorp","J.P.");
 	
-	// Save all available cargos
-	this.mapCargos = this.GetAvailableCargos();
+	// Give more starting money to company.
+	AICompany.SetLoanAmount(500000);
 	
-	// Choose the best cargo to start with: COAL, IORE, OIL_
-	local ok = this.CreateTrackForCargo("COAL");
-
+	// Save all available cargo types
+	this.mapCargos = this.GetAvailableCargos();
+		
+	// Determine order of preference for transportation of cargo.
+	/* (valuables),  (steel),  (iron ore),  (wood), (grain), (goods), (livestock), (oil), (mail),  (coal), (passenger) */
+	local prefCargos = ["COAL","IORE","OIL_","STEL","WOOD","GRAI","GOOD","MAIL","VALU","LVST","PASS"];
+	// Build a path for every cargo - try cargos in order of preference. Stop if there is not enough money. 
+	foreach(cargoName in prefCargos) {
+		if (cargoName in this.mapCargos) {
+			AILog.Info("==="+cargoName+"===");
+			try {
+				local trackWasBuilt = this.CreateTrackForCargo(cargoName);
+				if (!trackWasBuilt) {
+					AILog.Error("The track for " + cargoName + " could not be built.");	
+				}
+				else {
+					AILog.Info("The track for " + cargoName + " was successfuly built.");	
+				}
+			} catch(exception) {
+				AILog.Error("Error encountered: " + exception); 	
+			}
+			this.ClearSigns();
+		}	
+	} 
+	
+	// Remove all signs
+	this.ClearSigns();
+	
 	// Run forever
 	while (true) {
 		//AILog.Info("Ahoj vsichni! Provedl jsem " + "instrukci: " + this.GetTick());
@@ -65,11 +90,9 @@ function Xpetrovs::CreateTrackForCargo(cargoName)
 	// Find places for train stations.	
 	local startTile = this.GetStationCorner(consumerTile, cargoId, true);
 	local goalTile = this.GetStationCorner(sourceTile, cargoId, false);
-	// Check if any places were found. If not, re-run the method.
+	// Check if any places were found. If not, end the method.
 	if ((startTile == null) || (goalTile == null)) {
-		AILog.Info("Start: " + startTile + " Goal: " + goalTile);
 		AILog.Warning("Cannot build a train station.");
-		this.ClearSigns();
 		return false;
 	}
 	// 
@@ -83,7 +106,7 @@ function Xpetrovs::CreateTrackForCargo(cargoName)
 	local path = this.pathFinder.FindPath(-1);
 	if (path == null) {
 		AILog.Warning("A path could not be found.");
-		return;
+		return false;
 	}
 	else {
 		AILog.Info("A path was found.");	
@@ -127,20 +150,20 @@ function Xpetrovs::CreateTrackForCargo(cargoName)
 	}
 	// Link to the consumer station
 	ret = AIRail.BuildRail(prevprev, prev, startTile + 3) && ret;
-	this.ClearSigns();
+	
   	// Build a depo
   	local depot = this.BuildDepot(fullPath.GetParent());
 	if (depot == null) {
 		AILog.Warning("A depot could not be built.");
-		this.ClearSigns();
-		return;
+		return false;
 	}
 	else {
 		AILog.Info("A depot was built.");	
 	}
 	// Create train (engine, wagons) and start the train.
 	local train = this.CreateTrain(depot, cargoId, startTile, goalTile);
-	  	
+	// Everything OK
+	return true;
 }
 
 function Xpetrovs::CreateTrain(depot, cargoId, startTile, goalTile)
@@ -206,11 +229,10 @@ function Xpetrovs::CreateTrain(depot, cargoId, startTile, goalTile)
 	ret = AIVehicle.StartStopVehicle(train) && ret;
 
 	if (ret) {
-		AILog.Info("Vlak byl postaven a spusten bez chyb.");
+		AILog.Info("The train was built and started operating with no problems.");
 	} else {
-		AILog.Warning("Pri staveni vlaku doslo k chybe.");
-		this.ClearSigns();
-		return;
+		AILog.Warning("There was an error while building the train.");
+		return false;
 	}
 	
 }
@@ -221,9 +243,13 @@ function Xpetrovs::GetAvailableCargos()
 {
 	// Associative array = table, key/value pair = slot
 	local tableCargos = {}
-	foreach(idx, dummy in AICargoList()) {
-		tableCargos[AICargo.GetCargoLabel(idx)] <- idx;
-		//AILog.Info(idx + ": " + AICargo.GetCargoLabel(idx));	
+	foreach(cargoId, dummy in AICargoList()) {
+		if (AIIndustryList_CargoAccepting(cargoId).Count() > 0 && 
+		AIIndustryList_CargoProducing(cargoId).Count() > 0) {
+			tableCargos[AICargo.GetCargoLabel(cargoId)] <- cargoId;		
+			//AILog.Info(cargoId + ": " + AICargo.GetCargoLabel(cargoId));	
+		}
+		
 	}
 	return tableCargos;
 }
@@ -243,13 +269,13 @@ function Xpetrovs::GetCargoPlaces(/*String*/ cargoName)
 	// Add labels to sources
 	foreach(idx, dummy in listSources) {
 		local ppTile = AIIndustry.GetLocation(idx);
-		//this.UpdateSign(ppTile, cargoName + " source");
+		this.UpdateSign(ppTile, cargoName + " source");
 	}
 	
 	// Add labels to targets
 	foreach(idx, dummy in listTargets) {
 		local ppTile = AIIndustry.GetLocation(idx);
-		//this.UpdateSign(ppTile, cargoName + " target");
+		this.UpdateSign(ppTile, cargoName + " target");
 	}
 	
 	// return lists
@@ -401,7 +427,7 @@ function Xpetrovs::BuildDepot(/* AyStar.Path */ path) {
 }
 
 /*
-	odstraneni vsech popisek
+	odstraneni vsech popisku
 */
 function Xpetrovs::ClearSigns() {
 	foreach (idx, dSign in AISignList()) {
@@ -431,13 +457,13 @@ function Xpetrovs::FindSign(/*AITile*/ tile) {
 }
 
 /*
-	rozsireni textu popisku
+	zmenit text popisku
 */
 function Xpetrovs::UpdateSign(/*AITile*/ tile, /*String*/ text) {
 	local sign = this.FindSign(tile);
 	if(!sign) {
 		sign = AISign.BuildSign(tile, text);
 	} else {
-		AISign.SetName(sign, AISign.GetName(sign) + " " + text);
+		AISign.SetName(sign, text);
 	}
 }
