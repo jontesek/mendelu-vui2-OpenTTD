@@ -1,20 +1,9 @@
-*.pydevproject
-.metadata
-.gradle
-bin/
-tmp/
-*.tmp
-*.bak
-*.swp
-*~.nib
-local.properties
-.settings/
-.loadpath
+# Ignore everything 
+/*
 
-# Eclipse Core
-.project
+# Files not to ignore
+!/.gitignore
+!/README.md
 
-# OpenTTD
-library/
-1templates/
-katureel/
+# Folders not to ignore
+!/xpetrovs/

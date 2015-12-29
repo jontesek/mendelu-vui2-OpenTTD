@@ -12,9 +12,9 @@ class Xpetrovs extends AIController {
 	
 	// AI class constructor
 	constructor() {
-		// Set normal rail type.
+		// Set a rail type.
 		local types = AIRailTypeList();
-		AIRail.SetCurrentRailType(types[0]);
+		AIRail.SetCurrentRailType(types.Begin());
 		// Create a PathFinder object.
 		this.pathFinder = RailPathFinder();
 	}
@@ -178,18 +178,18 @@ function Xpetrovs::CreateTrain(depot, cargoId, startTile, goalTile)
 	engList.KeepValue(0);
 
 	engList.Valuate(AIEngine.GetPrice);
-	// seradime podle ceny od nejdrazsiho
-	engList.Sort(AIList.SORT_BY_VALUE, AIList.SORT_DESCENDING);
-	// nechame dve nejdrazsi a odstranime prvni - zustane nam druha nejlevnejsi
+	// seradime podle ceny od nejlevnejsi
+	engList.Sort(AIList.SORT_BY_VALUE, AIList.SORT_ASCENDING);
+	// nechame dve nejlevnejsi a odstranime prvni - zustane nam druha nejlevnejsi
 	engList.KeepTop(2);
     engList.RemoveTop(1);
 	local engineType = engList.Begin();
 
 	// postavime lokomotivu
 	local train = AIVehicle.BuildVehicle(depot, engineType);
-	
+
 	local ret = AIVehicle.IsValidVehicle(train);
-	AILog.Info(ret);
+	
 	// postavime 5 vagonu
 	for (local i = 0; i < 6; i++) {
 	    local wagon = AIVehicle.BuildVehicle(depot, wagonType);
