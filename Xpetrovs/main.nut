@@ -28,8 +28,8 @@ function Xpetrovs::Start()
 {
 	// Check settings
 	if (AIGameSettings.GetValue("pf.forbid_90_deg") == 1) {
-		AILog.Warning("Toto AI nemusi fungovat spravne, pokud je v nastaveni zakazano zataceni vlaku v uhlu 90°.");
-		AILog.Warning("Advanced Settings -> Vehicles -> Routing -> check off Forbid trains and ships from making 90° turns");
+		AILog.Warning("This AI do not have to work correctly, if in the settings trains are forbidden to turn in 90° angle.");
+		AILog.Warning("Solution: Advanced Settings -> Vehicles -> Routing -> turn off Forbid trains and ships from making 90° turns");
 		return;
 	}
 	// Remove all signs
@@ -38,16 +38,16 @@ function Xpetrovs::Start()
 	// Set company name
 	this.NameCompany("JontesRailCorp","J.P.");
 	
-	// Give more starting money to company.
+	// Give more available money to company.
 	AICompany.SetLoanAmount(500000);
 	
-	// Save all available cargo types
+	// Save all available cargo types.
 	this.mapCargos = this.GetAvailableCargos();
 		
 	// Determine order of preference for transportation of cargo.
 	/* (valuables),  (steel),  (iron ore),  (wood), (grain), (goods), (livestock), (oil), (mail),  (coal), (passenger) */
 	local prefCargos = ["COAL","IORE","OIL_","STEL","WOOD","GRAI","GOOD","MAIL","VALU","LVST","PASS"];
-	// Build a path for every cargo - try cargos in order of preference. Stop if there is not enough money. 
+	// Build a path for every cargo - try cargos in order of preference. 
 	foreach(cargoName in prefCargos) {
 		if (cargoName in this.mapCargos) {
 			AILog.Info("==="+cargoName+"===");
@@ -83,8 +83,10 @@ function Xpetrovs::CreateTrackForCargo(cargoName)
 	// Get cargo sources and targets.
 	local cargoPlaces = this.GetCargoPlaces(cargoName);
 	// Choose suitable places.
-	local sourceTile = AIIndustry.GetLocation(cargoPlaces[0].Begin());
-	local consumerTile = AIIndustry.GetLocation(cargoPlaces[1].Begin());
+	local sourceIndustry = cargoPlaces[0].Begin();
+	local sourceTile = AIIndustry.GetLocation(sourceIndustry);
+	local consumerIndustry = cargoPlaces[1].Begin();
+	local consumerTile = AIIndustry.GetLocation(consumerIndustry);
 	//this.UpdateSign(sourceTile, "START");
 	//this.UpdateSign(consumerTile, "GOAL");
 	// Find places for train stations.	
@@ -161,12 +163,12 @@ function Xpetrovs::CreateTrackForCargo(cargoName)
 		AILog.Info("A depot was built.");	
 	}
 	// Create train (engine, wagons) and start the train.
-	local train = this.CreateTrain(depot, cargoId, startTile, goalTile);
+	local train = this.CreateTrain(depot, cargoId, startTile, goalTile, sourceIndustry);
 	// Everything OK
 	return true;
 }
 
-function Xpetrovs::CreateTrain(depot, cargoId, startTile, goalTile)
+function Xpetrovs::CreateTrain(depot, cargoId, startTile, goalTile, sourceIndustry)
 {
 	// seznam vsech kolejovych vozidel (vagony i lokomotivy)
 	local engList = AIEngineList(AIVehicle.VT_RAIL);
@@ -213,12 +215,19 @@ function Xpetrovs::CreateTrain(depot, cargoId, startTile, goalTile)
 
 	local ret = AIVehicle.IsValidVehicle(train);
 	
-	// postavime 5 vagonu
-	for (local i = 0; i < 6; i++) {
+	// Find out, how many wagons (X) are needed - based on source production and wagon capacity.
+	local sourceProduction = AIIndustry.GetLastMonthProduction(sourceIndustry, cargoId);
+	local wagonCapacity = AIEngine.GetCapacity(wagonType);
+	local wagonsCount = floor(sourceProduction / wagonCapacity);
+	if (wagonsCount > 10) {
+		wagonsCount = 10;	// not too greedy	
+	}
+	AILog.Info("Number of wagons to buy: " + sourceProduction + "/" + wagonCapacity + " = " + wagonsCount);
+	// Buy and connect X wagons.
+	for (local i = 0; i <= wagonsCount; i++) {
 	    local wagon = AIVehicle.BuildVehicle(depot, wagonType);
 		ret = AIVehicle.IsValidVehicle(wagon) && ret;
-		// pripoji vagony k vlaku
-		ret = AIVehicle.MoveWagon(wagon, 0, train, 0) && ret;
+		ret = AIVehicle.MoveWagon(wagon, 0, train, 0) && ret;	// connect wagon to the train
 	}
 	
 	// nastaveni jizdniho radu
@@ -279,8 +288,7 @@ function Xpetrovs::GetCargoPlaces(/*String*/ cargoName)
 	}
 	
 	// return lists
-	local a = [listSources, listTargets];
-	return a;
+	return [listSources, listTargets];
 }
 
 function Xpetrovs::NameCompany(strName, strPresident)
@@ -295,7 +303,8 @@ function Xpetrovs::NameCompany(strName, strPresident)
   	AICompany.SetPresidentName(strPresident);
 }
 
-// FUNCTIONS FROM MR. POPELKA
+
+/* FUNCTIONS FROM MR. POPELKA */
 
 // funkce volana pri ukladani hry
 function Xpetrovs::Save() {
@@ -441,7 +450,7 @@ function Xpetrovs::ClearSigns() {
 function Xpetrovs::TileToXY(/*AITIle*/ tile) {
 	local y = floor(tile / AIMap.GetMapSizeX());
 	local x = tile - y * AIMap.GetMapSizeX();
-	return [x, y];
+	return x + "," + y;
 }
 
 /*
