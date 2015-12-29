@@ -12,7 +12,10 @@ class Xpetrovs extends AIController {
 	
 	// AI class constructor
 	constructor() {
-		AIRail.SetCurrentRailType(AIRailTypeList().Begin());
+		// Set normal rail type.
+		local types = AIRailTypeList();
+		AIRail.SetCurrentRailType(types[0]);
+		// Create a PathFinder object.
 		this.pathFinder = RailPathFinder();
 	}
 }
@@ -33,7 +36,7 @@ function Xpetrovs::Start()
 	this.ClearSigns();
 	
 	// Set company name
-	AICompany.SetName("XpetrovsRailCorp");
+	this.NameCompany("JontesRailCorp","J.P.");
 	
 	// Save all available cargos
 	this.mapCargos = this.GetAvailableCargos();
@@ -50,7 +53,8 @@ function Xpetrovs::Start()
 
 function Xpetrovs::CreateTrackForCargo(cargoName)
 {
-	local cargoID = this.mapCargos[cargoName]; 
+	// Get ID of the given cargo type.
+	local cargoId = this.mapCargos[cargoName]; 
 	// Get cargo sources and targets.
 	local cargoPlaces = this.GetCargoPlaces(cargoName);
 	// Choose suitable places.
@@ -59,8 +63,8 @@ function Xpetrovs::CreateTrackForCargo(cargoName)
 	//this.UpdateSign(sourceTile, "START");
 	//this.UpdateSign(consumerTile, "GOAL");
 	// Find places for train stations.	
-	local startTile = this.GetStationCorner(consumerTile, cargoID, true);
-	local goalTile = this.GetStationCorner(sourceTile, cargoID, false);
+	local startTile = this.GetStationCorner(consumerTile, cargoId, true);
+	local goalTile = this.GetStationCorner(sourceTile, cargoId, false);
 	// Check if any places were found. If not, re-run the method.
 	if ((startTile == null) || (goalTile == null)) {
 		AILog.Info("Start: " + startTile + " Goal: " + goalTile);
@@ -71,17 +75,20 @@ function Xpetrovs::CreateTrackForCargo(cargoName)
 	// 
 	local sources = [[startTile + 4, startTile + 3]];
 	local goals = [[goalTile + 4, goalTile + 3]];
-	// Pridat popisky 
+	// Add signs
 	AISign.BuildSign(sources[0][0], "|Start|");
 	AISign.BuildSign(goals[0][1], "|Finish|");
-	// Najit cestu
-	this.pathFinder.InitializePath(sources, goals, []);
+	// Find a path
+	this.pathFinder.InitializePath(sources, goals);
 	local path = this.pathFinder.FindPath(-1);
 	if (path == null) {
-		AILog.Warning("A path was not found.");
+		AILog.Warning("A path could not be found.");
 		return;
 	}
-	// Postavit zastavky
+	else {
+		AILog.Info("A path was found.");	
+	}
+	// Build train stations
   	AIRail.BuildRailStation(startTile, AIRail.RAILTRACK_NE_SW, 1, 4, AIStation.STATION_NEW);
   	AIRail.BuildRailStation(goalTile, AIRail.RAILTRACK_NE_SW, 1, 4, AIStation.STATION_NEW);
 	// Link to the source station
@@ -93,6 +100,7 @@ function Xpetrovs::CreateTrackForCargo(cargoName)
 	*/
 	local prev = null;
 	local prevprev = null;
+	local fullPath = path;
 	while (path != null) {
 	  if (prevprev != null) {
 	    if (AIMap.DistanceManhattan(prev, path.GetTile()) > 1) {
@@ -119,9 +127,94 @@ function Xpetrovs::CreateTrackForCargo(cargoName)
 	}
 	// Link to the consumer station
 	ret = AIRail.BuildRail(prevprev, prev, startTile + 3) && ret;
-  	
-  	
+	this.ClearSigns();
+  	// Build a depo
+  	local depot = this.BuildDepot(fullPath.GetParent());
+	if (depot == null) {
+		AILog.Warning("A depot could not be built.");
+		this.ClearSigns();
+		return;
+	}
+	else {
+		AILog.Info("A depot was built.");	
+	}
+	// Create train (engine, wagons) and start the train.
+	local train = this.CreateTrain(depot, cargoId, startTile, goalTile);
+	  	
 }
+
+function Xpetrovs::CreateTrain(depot, cargoId, startTile, goalTile)
+{
+	// seznam vsech kolejovych vozidel (vagony i lokomotivy)
+	local engList = AIEngineList(AIVehicle.VT_RAIL);
+	
+	// vsem polozkam se priradi true, pokud jsou to vagony; false pokud to vagony nejsou
+    engList.Valuate(AIEngine.IsWagon);
+	// ponechame v seznamu pouze polozky, ktere maji true (jsou vagony)
+    engList.KeepValue(1);
+    
+    engList.Valuate(AIEngine.IsBuildable);
+	// ponechame v seznamu jen vagony, ktere lze postavit
+   	engList.KeepValue(1);
+
+	// vsem polozkam seznamu se priradi true, pokud je mozne je pouzit pro prepravu daneho Carga
+    engList.Valuate(AIEngine.CanRefitCargo, cargoId);
+	engList.KeepValue(1);
+
+	// vsem polozkam se priradi jako hodnoceni kapacita vagonu
+	engList.Valuate(AIEngine.GetCapacity);
+	// seradime od nejvetsiho
+	engList.Sort(AIList.SORT_BY_VALUE, AIList.SORT_DESCENDING);
+	// vybereme polozku, ktera ma nejvetsi kapacitu
+    engList.KeepTop(1);
+	// tento typ wagonu budeme pouzivat
+	local wagonType = engList.Begin();
+	
+
+	// seznam vsech kolejovych vozidel
+	engList = AIEngineList(AIVehicle.VT_RAIL);
+	engList.Valuate(AIEngine.IsWagon);
+	// ponechame polozky, ktere nejsou vagony
+	engList.KeepValue(0);
+
+	engList.Valuate(AIEngine.GetPrice);
+	// seradime podle ceny od nejdrazsiho
+	engList.Sort(AIList.SORT_BY_VALUE, AIList.SORT_DESCENDING);
+	// nechame dve nejdrazsi a odstranime prvni - zustane nam druha nejlevnejsi
+	engList.KeepTop(2);
+    engList.RemoveTop(1);
+	local engineType = engList.Begin();
+
+	// postavime lokomotivu
+	local train = AIVehicle.BuildVehicle(depot, engineType);
+	
+	local ret = AIVehicle.IsValidVehicle(train);
+	AILog.Info(ret);
+	// postavime 5 vagonu
+	for (local i = 0; i < 6; i++) {
+	    local wagon = AIVehicle.BuildVehicle(depot, wagonType);
+		ret = AIVehicle.IsValidVehicle(wagon) && ret;
+		// pripoji vagony k vlaku
+		ret = AIVehicle.MoveWagon(wagon, 0, train, 0) && ret;
+	}
+	
+	// nastaveni jizdniho radu
+	ret = AIOrder.AppendOrder(train, goalTile, AIOrder.AIOF_FULL_LOAD_ANY) && ret;
+	ret = AIOrder.AppendOrder(train, startTile, AIOrder.AIOF_NONE) && ret;
+
+	// pusteni vlaku
+	ret = AIVehicle.StartStopVehicle(train) && ret;
+
+	if (ret) {
+		AILog.Info("Vlak byl postaven a spusten bez chyb.");
+	} else {
+		AILog.Warning("Pri staveni vlaku doslo k chybe.");
+		this.ClearSigns();
+		return;
+	}
+	
+}
+
 
 // Get all available (on the current map) cargo types.
 function Xpetrovs::GetAvailableCargos()
@@ -139,13 +232,13 @@ function Xpetrovs::GetAvailableCargos()
 function Xpetrovs::GetCargoPlaces(/*String*/ cargoName)
 {
 	// Get ID of the given cargo label.
-	local cargoID = this.mapCargos[cargoName]
+	local cargoId = this.mapCargos[cargoName]
 	
 	// Get sources - i.e. coal mine
-	local listSources = AIIndustryList_CargoProducing(cargoID);
+	local listSources = AIIndustryList_CargoProducing(cargoId);
 	
 	// Get targets - i.e. powerplant
-	local listTargets = AIIndustryList_CargoAccepting(cargoID);
+	local listTargets = AIIndustryList_CargoAccepting(cargoId);
 	
 	// Add labels to sources
 	foreach(idx, dummy in listSources) {
@@ -162,6 +255,18 @@ function Xpetrovs::GetCargoPlaces(/*String*/ cargoName)
 	// return lists
 	local a = [listSources, listTargets];
 	return a;
+}
+
+function Xpetrovs::NameCompany(strName, strPresident)
+{
+	if (!AICompany.SetName(strName)) {
+	    local i = 2;
+	    while (!AICompany.SetName(strName + " #" + i)) {
+	    	i = i + 1;
+	    	if(i > 255) break;
+	    }
+  	}	
+  	AICompany.SetPresidentName(strPresident);
 }
 
 // FUNCTIONS FROM MR. POPELKA
