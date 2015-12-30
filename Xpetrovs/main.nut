@@ -48,13 +48,15 @@ function Xpetrovs::Start()
 	/* (valuables),  (steel),  (iron ore),  (wood), (grain), (goods), (livestock), (oil), (mail),  (coal), (passenger) */
 	local prefCargos = ["COAL","IORE","OIL_","STEL","WOOD","GRAI","GOOD","MAIL","VALU","LVST","PASS"];
 	// Build a path for every cargo - try cargos in order of preference. 
+	local lastPlaceIndex = 0;
 	foreach(cargoName in prefCargos) {
 		if (cargoName in this.mapCargos) {
 			AILog.Info("==="+cargoName+"===");
 			try {
-				local trackWasBuilt = this.CreateTrackForCargo(cargoName);
+				local trackWasBuilt = this.CreateTrackForCargo(cargoName, lastPlaceIndex);
 				if (!trackWasBuilt) {
 					AILog.Error("The track for " + cargoName + " could not be built.");	
+					lastPlaceIndex += 1;
 				}
 				else {
 					AILog.Info("The track for " + cargoName + " was successfuly built.");	
@@ -64,6 +66,7 @@ function Xpetrovs::Start()
 			}
 			this.ClearSigns();
 		}	
+		local lastPlaceIndex = 0;
 	} 
 	
 	// Remove all signs
@@ -76,16 +79,17 @@ function Xpetrovs::Start()
 	}
 }
 
-function Xpetrovs::CreateTrackForCargo(cargoName)
+function Xpetrovs::CreateTrackForCargo(cargoName, lastPlaceIndex)
 {
 	// Get ID of the given cargo type.
 	local cargoId = this.mapCargos[cargoName]; 
-	// Get cargo sources and targets.
+	// Get cargo sources and targets (all in the whole map).
 	local cargoPlaces = this.GetCargoPlaces(cargoName);
-	// Choose suitable places.
-	local sourceIndustry = cargoPlaces[0].Begin();
+	// Choose a suitable place pair.
+	local placePair = this.ChoosePlacePair(cargoPlaces, lastPlaceIndex)
+	local sourceIndustry = placePair[0];
 	local sourceTile = AIIndustry.GetLocation(sourceIndustry);
-	local consumerIndustry = cargoPlaces[1].Begin();
+	local consumerIndustry = placePair[1];
 	local consumerTile = AIIndustry.GetLocation(consumerIndustry);
 	//this.UpdateSign(sourceTile, "START");
 	//this.UpdateSign(consumerTile, "GOAL");
@@ -108,6 +112,7 @@ function Xpetrovs::CreateTrackForCargo(cargoName)
 	local path = this.pathFinder.FindPath(-1);
 	if (path == null) {
 		AILog.Warning("A path could not be found.");
+		//AILog.Warning(AIError.GetLastErrorString());
 		return false;
 	}
 	else {
@@ -164,8 +169,12 @@ function Xpetrovs::CreateTrackForCargo(cargoName)
 	}
 	// Create train (engine, wagons) and start the train.
 	local train = this.CreateTrain(depot, cargoId, startTile, goalTile, sourceIndustry);
-	// Everything OK
-	return true;
+	
+	// Was everything OK?
+	if (train) {
+		return true;	
+	}
+	return false;
 }
 
 function Xpetrovs::CreateTrain(depot, cargoId, startTile, goalTile, sourceIndustry)
@@ -239,6 +248,7 @@ function Xpetrovs::CreateTrain(depot, cargoId, startTile, goalTile, sourceIndust
 
 	if (ret) {
 		AILog.Info("The train was built and started operating with no problems.");
+		return true;
 	} else {
 		AILog.Warning("There was an error while building the train.");
 		return false;
@@ -289,6 +299,34 @@ function Xpetrovs::GetCargoPlaces(/*String*/ cargoName)
 	
 	// return lists
 	return [listSources, listTargets];
+}
+
+function Xpetrovs::ChoosePlacePair(cargoPlaces, lastPlaceIndex)
+{
+	local allPairs = {};
+	// For every source, find the closest target.
+	foreach (source, dummy in cargoPlaces[0]) {
+		local lowestDist = {targ = -1, dist=999999};
+		foreach (target, dummy in cargoPlaces[1]) {
+			local distance =  AIIndustry.GetDistanceManhattanToTile(source, AIIndustry.GetLocation(target));
+			if (distance < lowestDist.dist) {
+				allPairs[distance] <- [source, target];	
+				lowestDist = {targ = target, dist=distance};
+			}
+		}
+	}
+	// Choose a pair with the lowest distance.
+	local lowestDist = {source = -1, target = -1, dist=999999};
+	foreach (distance, pair in allPairs) {
+		if (distance < lowestDist.dist) {
+			lowestDist = {source = pair[0], target = pair[1], dist=distance};		
+		}	
+	}
+	AILog.Info("Closest places: " + AIIndustry.GetName(lowestDist.source) + " -> " + AIIndustry.GetName(lowestDist.target) + " | distance: " + lowestDist.dist);
+	// result
+	return [lowestDist.source, lowestDist.target];
+	
+	//return [cargoPlaces[0].Begin(), cargoPlaces[1].Begin()];
 }
 
 function Xpetrovs::NameCompany(strName, strPresident)
