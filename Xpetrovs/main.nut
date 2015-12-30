@@ -204,7 +204,6 @@ function Xpetrovs::CreateTrain(depot, cargoId, startTile, goalTile, sourceIndust
 	// tento typ wagonu budeme pouzivat
 	local wagonType = engList.Begin();
 	
-
 	// seznam vsech kolejovych vozidel
 	engList = AIEngineList(AIVehicle.VT_RAIL);
 	engList.Valuate(AIEngine.IsWagon);
