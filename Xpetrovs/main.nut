@@ -39,7 +39,13 @@ function Xpetrovs::Start()
 	this.NameCompany("JontesRailCorp","J.P.");
 	
 	// Give more available money to company.
-	AICompany.SetLoanAmount(500000);
+	local compLoan = 500000;
+	AICompany.SetLoanAmount(compLoan);
+	
+	// Initial info
+	AILog.Info(">>>>WELCOME TO XPETROVS AI!<<<<")
+	AILog.Info("Loan amount (initial company cash): $" + AICompany.GetBankBalance(AICompany.COMPANY_SELF));	
+	AILog.Info("Firstly some tracks are going to be built (for all available cargos).");
 	
 	// Save all available cargo types.
 	this.mapCargos = this.GetAvailableCargos();
@@ -65,6 +71,7 @@ function Xpetrovs::Start()
 				AILog.Error("Error encountered: " + exception); 	
 			}
 			this.ClearSigns();
+			AILog.Info("-> current cash: $" + AICompany.GetBankBalance(AICompany.COMPANY_SELF));	
 		}	
 		local lastPlaceIndex = 0;
 	} 
@@ -72,10 +79,13 @@ function Xpetrovs::Start()
 	// Remove all signs
 	this.ClearSigns();
 	
+	AILog.Info(">>>>KEEP PLAYING, HAVE FUN!<<<<")
+	
 	// Run forever
 	while (true) {
-		//AILog.Info("Ahoj vsichni! Provedl jsem " + "instrukci: " + this.GetTick());
-		//this.Sleep(100);
+		AILog.Info("Company cash: $" + AICompany.GetBankBalance(AICompany.COMPANY_SELF));
+		//AILog.Warning(AIError.GetLastErrorString());
+		this.Sleep(1000);
 	}
 }
 
@@ -159,7 +169,7 @@ function Xpetrovs::CreateTrackForCargo(cargoName, lastPlaceIndex)
 	ret = AIRail.BuildRail(prevprev, prev, startTile + 3) && ret;
 	
   	// Build a depo
-  	local depot = this.BuildDepot(fullPath.GetParent());
+  	local depot = this.BuildDepot(fullPath.GetParent().GetParent());
 	if (depot == null) {
 		AILog.Warning("A depot could not be built.");
 		return false;
@@ -211,31 +221,53 @@ function Xpetrovs::CreateTrain(depot, cargoId, startTile, goalTile, sourceIndust
 	engList.KeepValue(0);
 
 	engList.Valuate(AIEngine.GetPrice);
-	// seradime podle ceny od nejlevnejsi
-	engList.Sort(AIList.SORT_BY_VALUE, AIList.SORT_ASCENDING);
-	// nechame dve nejlevnejsi a odstranime prvni - zustane nam druha nejlevnejsi
-	engList.KeepTop(2);
-    engList.RemoveTop(1);
+	// Seradime podle ceny od nejdrazsiho.
+	engList.Sort(AIList.SORT_BY_VALUE, AIList.SORT_DESCENDING);
+	// Ponechame jen ty, na ktere mame penize (price <= cash).
+	engList.KeepBelowValue(AICompany.GetBankBalance(AICompany.COMPANY_SELF)+1)
+	if (engList.Count() > 1) {
+		// Odstranime prvni - zustane nam druha nejdrazsi.
+		engList.RemoveTop(1);		
+	}
 	local engineType = engList.Begin();
-
 	// postavime lokomotivu
 	local train = AIVehicle.BuildVehicle(depot, engineType);
-
+	// zkontrolovat, jestli byla postavena	
 	local ret = AIVehicle.IsValidVehicle(train);
+	if (ret) {
+		AILog.Info("Engine bought for $" + AIEngine.GetPrice(engineType) + ": " + AIEngine.GetName(engineType));	
+	}
+	else {
+		AILog.Warning("No engine could be bought.");
+		return false;
+	}
 	
-	// Find out, how many wagons (X) are needed - based on source production and wagon capacity.
+	// Find out, how many wagons (X) are needed - based on monthly source production and wagon capacity.
 	local sourceProduction = AIIndustry.GetLastMonthProduction(sourceIndustry, cargoId);
 	local wagonCapacity = AIEngine.GetCapacity(wagonType);
-	local wagonsCount = floor(sourceProduction / wagonCapacity);
+	local wagonsCount = (sourceProduction / wagonCapacity) / 2; // Divide by 2 - to not have so long loading time and have space for another AI.	
+	//wagonsCount = ceil(wagonsCount);
 	if (wagonsCount > 10) {
-		wagonsCount = 10;	// not too greedy	
+		wagonsCount = 10;	// not too greedy.
 	}
-	AILog.Info("Number of wagons to buy: " + sourceProduction + "/" + wagonCapacity + " = " + wagonsCount);
+	if (wagonsCount <= 1) {
+		wagonsCount = 2;	// have at least 2 wagons - the source might in the future produce more.
+	}
+	AILog.Info("Number of wagons to buy: (" + sourceProduction + "/" + wagonCapacity + ")/2 ... " + wagonsCount);
 	// Buy and connect X wagons.
-	for (local i = 0; i <= wagonsCount; i++) {
+	for (local i = 0; i < wagonsCount; i++) {
+		// Buy a wagon.
 	    local wagon = AIVehicle.BuildVehicle(depot, wagonType);
+	    // Refit wagon to given cargo type.
+	    ret = AIVehicle.RefitVehicle(wagon, cargoId);
 		ret = AIVehicle.IsValidVehicle(wagon) && ret;
-		ret = AIVehicle.MoveWagon(wagon, 0, train, 0) && ret;	// connect wagon to the train
+		// Connect wagon to the train.
+		ret = AIVehicle.MoveWagon(wagon, 0, train, 0) && ret;	
+		// Check available cash for next wagon.
+		if (AIEngine.GetPrice(wagonType) > AICompany.GetBankBalance(AICompany.COMPANY_SELF)) {
+			AILog.Warning("Cannot buy more than " + (i+1) + " wagons."); 
+			break;	
+		}
 	}
 	
 	// nastaveni jizdniho radu
@@ -244,6 +276,7 @@ function Xpetrovs::CreateTrain(depot, cargoId, startTile, goalTile, sourceIndust
 
 	// pusteni vlaku
 	ret = AIVehicle.StartStopVehicle(train) && ret;
+	//AILog.Warning(AIError.GetLastErrorString());
 
 	if (ret) {
 		AILog.Info("The train was built and started operating with no problems.");
