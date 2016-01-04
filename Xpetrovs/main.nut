@@ -20,6 +20,8 @@ class Xpetrovs extends AIController {
 		AIRail.SetCurrentRailType(types.Begin());
 		// Create a PathFinder object.
 		this.pathFinder = RailPathFinder();
+		this.pathFinder.cost.max_bridge_length = 10;
+		this.pathFinder.cost.max_tunnel_length = 10;
 	}
 }
 
@@ -51,7 +53,7 @@ function Xpetrovs::Start()
 	AILog.Info("Loan amount (initial company cash): $" + AICompany.GetBankBalance(AICompany.COMPANY_SELF));	
 	AILog.Info("Firstly some tracks are going to be built (for all available cargos).");
 	
-	// Save all available cargo types.
+	// Save all available cargo types to table: name => id
 	this.mapCargos = this.GetAvailableCargos();
 	// Get cargo places
 	this.cargoPlaces = {}
@@ -65,7 +67,7 @@ function Xpetrovs::Start()
 	/* (valuables),  (steel),  (iron ore),  (wood), (grain), (goods), (livestock), (oil), (mail),  (coal), (passenger) */
 	local prefCargos = ["COAL","IORE","OIL_","STEL","WOOD","GRAI","GOOD","MAIL","VALU","LVST","PASS"];
 	
-	// Build a path for every cargo - try cargos in order of preference. 
+	// Build a path for every cargo - in order of preference. 
 	local trackNumber = 1;
 	foreach(cargoName in prefCargos) {
 		if (cargoName in this.mapCargos) {
@@ -75,7 +77,7 @@ function Xpetrovs::Start()
 			AILog.Info("==="+cargoName+"===");
 			try {
 				local trackWasBuilt = this.CreateTrackForCargo(cargoName, trackNumber);
-				// Try to built track between all places.
+				// If the shortest path was not found, try to built track between all other place pairs.
 				while (trackWasBuilt == false) {
 					AILog.Error("The track for " + cargoName + " could not be built.");	
 					trackNumber += 1;			
@@ -115,8 +117,6 @@ function Xpetrovs::CreateTrackForCargo(cargoName, trackNumber)
 {
 	// Get ID of the given cargo type.
 	local cargoId = this.mapCargos[cargoName]; 
-	// Get cargo sources and targets (all in the whole map).
-	local cargoPlaces = this.cargoPlaces[cargoName];
 	// Choose a suitable place pair.
 	local placePair = this.ChoosePlacePair(cargoName)
 	// Check if we should end this madness - no method for number of elements in table? wtf?
@@ -198,7 +198,7 @@ function Xpetrovs::CreateTrackForCargo(cargoName, trackNumber)
 	ret = AIRail.BuildRail(prevprev, prev, startTile + 3) && ret;
 	
   	// Build a depo
-  	local depot = this.BuildDepot(fullPath.GetParent().GetParent());
+  	local depot = this.BuildDepot(fullPath.GetParent().GetParent().GetParent());
 	if (depot == null) {
 		AILog.Warning("A depot could not be built.");
 		return false;
@@ -272,18 +272,19 @@ function Xpetrovs::CreateTrain(depot, cargoId, startTile, goalTile, sourceIndust
 		return false;
 	}
 	
-	// Find out, how many wagons (X) are needed - based on monthly source production and wagon capacity.
-	local sourceProduction = AIIndustry.GetLastMonthProduction(sourceIndustry, cargoId);
+	// Find out, how many wagons (X) are needed.
+	local sourceProduced = AIIndustry.GetLastMonthProduction(sourceIndustry, cargoId);
+	local sourceTransported = AIIndustry.GetLastMonthTransported(sourceIndustry, cargoId);
+	local sourceSurplus = sourceProduced - sourceTransported;
 	local wagonCapacity = AIEngine.GetCapacity(wagonType);
-	local wagonsCount = (sourceProduction / wagonCapacity) / 2; // Divide by 2 - to not have so long loading time and have space for another AI.	
-	//wagonsCount = ceil(wagonsCount);
+	local wagonsCount = ceil(sourceSurplus / wagonCapacity);
 	if (wagonsCount > 10) {
 		wagonsCount = 10;	// not too greedy.
 	}
 	if (wagonsCount <= 1) {
 		wagonsCount = 2;	// have at least 2 wagons - the source might in the future produce more.
 	}
-	AILog.Info("Number of wagons to buy: (" + sourceProduction + "/" + wagonCapacity + ")/2 ... " + wagonsCount);
+	AILog.Info("Number of wagons to buy: (" + sourceSurplus + "/" + wagonCapacity + ") ... " + wagonsCount);
 	// Buy and connect X wagons.
 	for (local i = 0; i < wagonsCount; i++) {
 		// Buy a wagon.
@@ -373,6 +374,13 @@ function Xpetrovs::ChoosePlacePair(cargoName)
 	// Choose a pair with the lowest distance.
 	local lowestDist = {source = -1, target = -1, dist=9999999};
 	foreach (distance, pair in this.placePairs[cargoName]) {
+		// Check percentage of produced cargo transported - if it's > 70 %, do not build here.
+		local transPct = AIIndustry.GetLastMonthTransportedPercentage(pair[0], this.mapCargos[cargoName]);
+		if (transPct > 70) {
+			//AILog.Warning("SKIP");
+			continue; // skip this pair
+		}
+		// Check distance
 		if (distance < lowestDist.dist) {
 			lowestDist = {source = pair[0], target = pair[1], dist=distance};		
 		}	
